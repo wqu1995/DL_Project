@@ -213,6 +213,6 @@ class ResNet(nn.Module):
 
 
 def Res_Deeplab(num_classes=2):
-	#ResNet 18 
-    model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
+	#ResNet 50
+    model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes)
     return model
