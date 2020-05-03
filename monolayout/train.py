@@ -38,7 +38,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--type', type=str, choices =['static', 'dynamic'], help='Type of model being trained')
+    parser.add_argument('--type', type=str, choices =['static', 'dynamic'], help='Type of model being trained', default='static')
 
     return parser.parse_args()
 
