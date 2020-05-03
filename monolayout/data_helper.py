@@ -66,7 +66,9 @@ class UnlabeledDataset(torch.utils.data.Dataset):
                 image = Image.open(image_path)
                 images.append(self.transform(image))
             image_tensor = torch.stack(images)
-            #image_tensor = torchvision.utils.make_grid(torch.stack(images), nrow = 3, padding = 0)
+            image_tensor = torch.cat([img for img in image_tensor], dim=1)
+            #image_tensor = torchvision.utils.make_grid(torch.stack(images), nrow=3, padding=0)
+
             return image_tensor
 
         elif self.first_dim == 'image':
@@ -111,7 +113,9 @@ class LabeledDataset(torch.utils.data.Dataset):
             image_path = os.path.join(sample_path, image_name)
             image = Image.open(image_path)
             images.append(self.transform(image))
+        # image_tensor = torchvision.utils.make_grid(torch.stack(images), nrow=3, padding=0)
         image_tensor = torch.stack(images)
+        image_tensor = torch.cat([img for img in image_tensor], dim=1)
 
         data_entries = self.annotation_dataframe[(self.annotation_dataframe['scene'] == scene_id) & (self.annotation_dataframe['sample'] == sample_id)]
         corners = data_entries[['fl_x', 'fr_x', 'bl_x', 'br_x', 'fl_y', 'fr_y','bl_y', 'br_y']].to_numpy()
