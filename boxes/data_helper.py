@@ -143,6 +143,6 @@ class LabeledDataset(torch.utils.data.Dataset):
             return image_tensor, target, road_image, extra
         
         else:
-            return image_tensor, target, road_image, boxes, sample_path
+            return image_tensor, target, road_image, boxes
 
     
