@@ -47,7 +47,7 @@ class Conv3x3(nn.Module):
 def upsample(x):
     """Upsample input tensor by a factor of 10
     """
-    return F.interpolate(x, scale_factor=3, mode="nearest")
+    return F.interpolate(x, scale_factor=2, mode="nearest")
 
 
 
@@ -63,11 +63,12 @@ class Decoder(nn.Module):
         self.conv_mu = nn.Conv2d(128, 128, 3, 1, 1)
         self.conv_log_sigma = nn.Conv2d(128, 128, 3, 1, 1)
 
-        self.up2sample = nn.Upsample(scale_factor = 2,mode='nearest')
-        self.outconv = nn.Conv2d(1,1,kernel_size = 44, dilation = 4)
+        self.conv15 = nn.Conv2d(1,1, kernel_size=6, dilation=3)
+        self.ConvTran = nn.ConvTranspose2d(1,1,kernel_size=2)
         self.hardtanh = nn.Hardtanh(0,1)
         self.softmax = nn.Softmax2d()
         self.relu = nn.ReLU(True)
+        self.bn = nn.BatchNorm2d(1)
         outputs = {}
         # decoder
         self.convs = OrderedDict()
@@ -79,16 +80,13 @@ class Decoder(nn.Module):
             self.convs[("upconv", i, 0)] = nn.Conv2d(num_ch_in, num_ch_out, 3, 1, 1) #Conv3x3(num_ch_in, num_ch_out)
             self.convs[("norm", i, 0)] = nn.BatchNorm2d(num_ch_out)
             self.convs[("relu", i, 0)] =  nn.ReLU(True)
-
             # upconv_1
             self.convs[("upconv", i, 1)] = nn.Conv2d(num_ch_out, num_ch_out, 3, 1, 1) #ConvBlock(num_ch_out, num_ch_out)
             self.convs[("norm", i, 1)] = nn.BatchNorm2d(num_ch_out)
 
         self.convs["topview"] = Conv3x3(self.num_ch_dec[0], self.num_output_channels)
-        self.dropout = nn.Dropout3d(0.2)
+        self.dropout = nn.Dropout3d(0.205)
         self.decoder = nn.ModuleList(list(self.convs.values()))
-
-
 
     def forward(self, x, is_training=True):
         for i in range(4, -1, -1):
@@ -100,24 +98,22 @@ class Decoder(nn.Module):
             x = self.convs[("upconv", i, 1)](x)
             x = self.convs[("norm", i, 1)](x)
 
-
         if is_training:
                 x = self.convs["topview"](x) #self.softmax(self.convs["topview"](x))
         else:
                 softmax = nn.Softmax2d()
                 x = softmax(self.convs["topview"](x))
         #outputs["car"] = x
-        x = self.up2sample(x)
-        x = self.outconv(x)
-        # x = self.hardtanh(x)
-        x = self.relu(x)
+
+        # print('Before Classifier Layer:')
+        # print(x.shape)
+        for j in range(4):
+            x = upsample(x)
+            x = self.conv15(x)
+            x = self.relu(x)
+        x = self.ConvTran(x)
+        x = self.hardtanh(x) #squeezing values into [0,1]
         return x #outputs
-
-
-
-
-
-
 
 class Encoder(nn.Module):
     def __init__(self, num_layers, img_ht, img_wt, pretrained=True):
