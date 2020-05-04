@@ -20,12 +20,12 @@ def car_angle(bl, br):
     else:
         return abs_angle
 
-def draw_black_rectangle(ax, corners):
+def draw_rectangle(ax, corners, color):
     fl, fr, bl, br = corners[:, 0], corners[:, 1], corners[:, 2], corners[:, 3]
     xy = (br[0] * 10 + 400, -br[1] * 10 + 400)
     width = torch.norm(br - fr, 2) * 10
     height = -torch.norm(br - bl, 2) * 10
-    rect = mpatches.Rectangle(xy, width, height, angle=car_angle(bl, br), color='black')
+    rect = mpatches.Rectangle(xy, width, height, angle=car_angle(bl, br), color=color)
     ax.add_patch(rect)
     
 def coordinates_to_binary_tensor(coordinates):
@@ -33,20 +33,23 @@ def coordinates_to_binary_tensor(coordinates):
     """output: (800, 800)"""
     
     ### Plot empty background (or negative roadmap) ###
-    fig, ax = plt.subplots()
-    plt.axis('off')
+    fig = plt.figure()
+    ax = fig.add_axes([0,0,1,1])
+    ax.axis('off')
+
     background = torch.zeros((800,800)) > 0
-    # background = road_image[0] != True
+    # background = ~road_image[0]
     ax.imshow(background, cmap='binary');
 
-    ### Draw Boxes ###
-    for i, bb in enumerate(coordinates):
-        draw_black_rectangle(ax, bb)
-
-    ### Ensure DPI is Correct and Save Image ###
+    # ### Ensure DPI is Correct and Save Image ###
     DPI = 200
     matplotlib.rcParams['figure.dpi'] = DPI
     fig.set_size_inches(800.0/float(DPI),800.0/float(DPI))
+
+    ### Draw Boxes ###
+    for i, bb in enumerate(coordinates):
+        draw_rectangle(ax, bb, 'black')
+
     fig.canvas.draw()
     plt.close(fig)
 
