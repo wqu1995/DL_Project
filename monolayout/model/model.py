@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from resnet_encoder import ResnetEncoder
+from model.resnet_encoder import ResnetEncoder
 # from .convlstm import ConvLSTM
 from collections import OrderedDict
 
