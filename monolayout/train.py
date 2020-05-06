@@ -15,7 +15,6 @@ from torch.autograd import Variable
 from data_helper import UnlabeledDataset, LabeledDataset
 from helper import collate_fn
 from model import model
-from utils.loss import BCEWithLogitsLoss2d
 import matplotlib.pyplot as plt
 import matplotlib
 
@@ -29,11 +28,11 @@ num_classes = 9
 width = 306
 height = 256
 
-r_width=800
-r_height=800
+r_width = 800
+r_height = 800
 
-batch_size =8
-epoch = 50000
+batch_size = 8
+epoch = 2000
 lr = 1e-4
 lr_step_size = 5
 iter_size = 1
@@ -56,6 +55,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--type', type=str, choices =['static', 'dynamic'], help='Type of model being trained', default='static')
+    parser.add_argument("eval_num", type=int, default=(106 + 134) / 2,
+                        help="Index separating training data and evaluation data(between 106,134).")
 
     return parser.parse_args()
 
@@ -87,7 +88,6 @@ def compute_losses(pred, target):
     # losses['loss'] = output.mean()
 
     # return losses
-
 
 def train():
     arg = get_args()
@@ -147,6 +147,12 @@ def train():
     # plt.axis('off')
     # plt.show()
 
+    #Dividing labeled data to training part and validation part:
+    eval_num = arg.eval_num
+    labeled_scene_index = np.arange(106,eval_num)
+    eval_scene_index = np.arange(eval_num,134)
+
+    #Labeled Data
     labeled_trainset = LabeledDataset(
         image_folder=image_folder,
         annotation_file=annotation_csv,
@@ -154,13 +160,25 @@ def train():
         transform=transform,
         extra_info=True
     )
-    trainloader_l = DataLoader(labeled_trainset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True, collate_fn=collate_fn, drop_last=True)
+    trainloader_l = DataLoader(labeled_trainset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True,
+                               collate_fn=collate_fn, drop_last=True)
     trainloader_l_iter = iter(trainloader_l)
 
+    #Evaluation/ Validation Data
+    eval_set = LabeledDataset(
+        image_folder = image_folder,
+        annotation_file = annotation_csv,
+        scene_index = eval_scene_index,
+        transform = transform,
+        extra_info = True
+    )
+    eval_loader = DataLoader(eval_set, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True,
+                               collate_fn=collate_fn, drop_last=True)
+
+    #labels for true/ false
     gt_label =1
     pred_label = 0
 
-    bce_loss = BCEWithLogitsLoss2d()
     upsample = nn.Upsample(size = (800, 800), mode='bilinear', align_corners=True)
     sigmoid = nn.Sigmoid()
 
@@ -194,7 +212,8 @@ def train():
                 batch.view(batch_size, 18, 512, 512).to(device)
 
                 features = models['encoder'](samples)
-                output = upsample(models['decoder'](features))
+                #output = upsample(models['decoder'](features)) #(Upsample moved to decoder)
+                output = models['decoder'](features)
 
                 fake_pred = models['discriminator'](output)
 
@@ -204,15 +223,15 @@ def train():
                     loss_semi_adv.backward()
                     loss_semi = 0
                 else:
-
+                    #Confidence Map:
                     fake_pred_sig = upsample(sigmoid(fake_pred))
 
                     ignore_mask = (fake_pred_sig < 0.2)
                     semi_gt = torch.ones(fake_pred_sig.shape)
                     semi_gt[ignore_mask] = 0
 
-                    loss_semi_ce = lambda_semi* compute_losses(output, semi_gt.to(device))
-                    loss_semi = loss_semi_ce+ loss_semi_adv
+                    loss_semi_ce = lambda_semi * compute_losses(output, semi_gt.to(device))
+                    loss_semi = loss_semi_ce + loss_semi_adv
                     loss_semi.backward()
             else:
                 loss_semi = 0
@@ -224,13 +243,16 @@ def train():
                 samples, labled_target, road_image, _ = trainloader_l_iter.next()
             except:
                 trainloader_l_iter = iter(trainloader_l)
-                samples, labled_target, road_image, extra = trainloader_l_iter()
+                samples, labled_target, road_image, extra = trainloader_l_iter.next()
+
             samples = torch.stack(samples).view(batch_size, 18, 512, 512).to(device)
             road_image = torch.stack(road_image).view(batch_size,1,800,800).float().to(device)
 
             features = models['encoder'](samples)
-            output = upsample(models['decoder'](features))
+            # output = upsample(models['decoder'](features)) #(Upsample moved into decoder)
+            output = models['decoder'](features)
             # print(output.shape)
+
             #compute L_ce
             loss_ce = compute_losses(output, road_image)
 
@@ -250,8 +272,17 @@ def train():
             loss_d.backward()
             model_optimizer_D.step()
 
+        #Print out losses every 100 epoch:
         if i %100 == 0:
             print(loss_g.item(), loss_d.item())
+
+    #Saving param to local folder:
+    torch.save(models['encoder'].state_dict(), 'encoder_save')
+    torch.save(models['decoder'].state_dict(), 'decoder_save')
+    path = {}
+    path['encoder'] = 'encoder_save'
+    path['decoder'] = 'decoder_save'
+    # eval_loss = main_loss(eval_loader, path, device)
 
 
 
@@ -394,14 +425,6 @@ def train():
     #         loss['loss_discr'] += loss_D.item()
     #
     #     print('loss: {:.4f}, disc loss:{:.4f}'.format(loss['loss'], loss['loss_discr']))
-
-
-
-
-
-
-
-
 
 if __name__ == '__main__':
     train()
