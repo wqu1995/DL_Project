@@ -75,8 +75,10 @@ def binary_tensor_to_coordinates(bb_binary):
         corners[0] = (corners[0] - 400) / 10
         corners[1] = - (corners[1] - 400) / 10
         coords_list.append(corners)
-
-    coords_output = torch.stack(coords_list)
+    if len(coords_list) > 0:
+        coords_output = torch.stack(coords_list)
+    else:
+        coords_output = torch.zeros((1,2,4))
     return coords_output
 
 def batch_binary_tensor_to_coordinates(batch_bb_binary):
