@@ -21,20 +21,19 @@ def get_transform_task2():
 
 class ModelLoader():
     # Fill the information for your team
-    team_name = 'team_name'
-    team_number = 1
-    round_number = 1
-    team_member = []
-    contact_email = '@nyu.edu'
+    team_name = 'Alset'
+    team_number = 36
+    round_number = 3
+    team_member = ['Wenjun Qu', 'Xulai Jiang', 'Neil Menghani']
+    contact_email = 'nlm326@nyu.edu'
 
-    def __init__(self, model_file='put_your_model_file(or files)_name_here'):
-        # You should 
-        #       1. create the model object
-        #       2. load your state_dict
-        #       3. call cuda()
-        # self.model = ...
-        # 
-        pass
+    def __init__(self, model_file='save':
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model_path = {'encoder':'save/encoder_save','decoder_road':'save/decoder_road','decoder_box':'save/decoder_box'}
+        self.encoder = model.Encoder(18,800,800,False,num_imgs=6).to(self.device)
+        self.encoder.load_state_dict(torch.load(model_path['encoder']))
+        self.decoder = model.Decoder(encoder.resnet_encoder.num_ch_enc).to(self.device)
+        self.decoder.load_state_dict(torch.load(model_path['decoder_road']))
 
     def get_bounding_boxes(self, samples):
         # samples is a cuda tensor with size [batch_size, 6, 3, 256, 306]
