@@ -31,36 +31,14 @@ def draw_rectangle(ax, corners, color):
 def coordinates_to_binary_tensor(coordinates):
     """input: (n, 2, 4)"""
     """output: (800, 800)"""
-    
-    # print(coordinates)
-    
-    ### Plot empty background (or negative roadmap) ###
-    fig = plt.figure()
-    ax = fig.add_axes([0,0,1,1])
-    ax.axis('off')
-
-    background = torch.zeros((800,800)) > 0
-    # background = ~road_image[0]
-    ax.imshow(background, cmap='binary');
-
-    ### Ensure DPI is Correct and Save Image ###
-    n = 800
-    DPI = 200
-    fig.set_size_inches(n/DPI,n/DPI)
-
-    ### Draw Boxes ###
-    for i, bb in enumerate(coordinates):
-        draw_rectangle(ax, bb, 'black')
-
-    fig.canvas.draw()
-    plt.close(fig)
-
-    # Now we can save it to a numpy array.
-    bb_image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-    bb_image = bb_image.reshape((n,n,3))
-    bb_image_gray = cv2.cvtColor(bb_image,cv2.COLOR_BGR2GRAY)
-    bb_image_binary = torch.tensor(bb_image_gray) < 255
-
+    img = np.ones((800,800)) * 255
+    for bb in coordinates:
+        bb[0,:] = bb[0,:]*10 + 400
+        bb[1,:] = -bb[1,:]*10 + 400
+        bb = torch.stack([bb[:, 0], bb[:, 1], bb[:, 3], bb[:, 2]])
+        bb = np.array(bb, dtype=np.int32)
+        cv2.fillPoly(img, [bb], 0)
+    bb_image_binary = torch.tensor(img) < 255
     return bb_image_binary
 
 def batch_coordinates_to_binary_tensor(batch_coordinates):
