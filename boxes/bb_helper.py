@@ -60,7 +60,10 @@ def binary_tensor_to_coordinates(bb_binary):
     ### Find Contours ###
     bb_image_gray = np.array((bb_binary != True).int()*255).astype(np.uint8)
     edged = cv2.Canny(bb_image_gray, 30, 200)
-    contours, hierarchy = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    try:
+        contours, hierarchy = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    except ValueError:
+        contours, hierarchy = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2:]
     
     ### Find Corners ###
     coords_list = []
