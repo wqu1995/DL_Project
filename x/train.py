@@ -1,6 +1,6 @@
+# code adpoted and inspried from https://github.com/hbutsuak95/monolayout and https://github.com/hfslyc/AdvSemiSeg
 import os
 
-import numpy as np
 import argparse
 
 import torch
@@ -16,11 +16,9 @@ from data_helper import UnlabeledDataset, LabeledDataset
 from helper import collate_fn
 from model import model
 
-from utils.loss import BCEWithLogitsLoss2d
 from helper import compute_ts_road_map, compute_ats_bounding_boxes
 import matplotlib.pyplot as plt
 from boxes.bb_helper import *
-import matplotlib
 
 image_folder = 'data'
 annotation_csv = 'data/annotation.csv'
@@ -28,20 +26,16 @@ save_dir = 'save'
 unlabled_scene_index = np.arange(106)
 labeled_scene_index = np.arange(106,130)
 vaildate_scene_index = np.arange(130,134)
-num_classes = 9
 
-width = 306
-height = 256
 
-r_width=800
-r_height=800
+height=256
+width=256
 
 batch_size =8
-epoch = 50000
-lr = 1e-4
-lr_step_size = 5
+step = 50000
+lr = 2.5e-4
+dlr = 1e-4
 iter_size = 1
-discr_train_epoch = 0
 weight = 5
 
 lambda_semi_adv = 0.001
@@ -49,16 +43,29 @@ semi_start_adv = 500
 
 lambda_semi = 0.1
 semi_start = 1000
-mask_t = 0.2
-
-alpha = 0.01
 
 lambda_adv = 0.1
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-upsample = nn.Upsample(size=(800, 800), mode='nearest')
+upsample_bb = nn.Upsample(size=(800, 800), mode='nearest')
+upsample_road = nn.Upsample(size=(800,800), mode='bilinear', align_corners=True)
 sigmoid = nn.Sigmoid()
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--type', type=str, choices =['static', 'dynamic'], help='Type of model being trained', default='dynamic')
+    parser.add_argument('--data', type=str, help='path to the data folder', default=image_folder)
+    parser.add_argument('--save', type=str, help='path to the save folder', default=save_dir)
+    parser.add_argument('--abtch', type=int, help='batch size', default=batch_size)
+    parser.add_argument('--step', type=int, help='step size', default=step)
+    parser.add_argument('--lr', type=float, help='learning rate for generator', default=lr)
+    parser.add_argument('--dlr', type=float, help='learning rate for discriminator', default=dlr)
+    parser.add_argument('--adv', type=int, help='starting step for adversary learning', default=semi_start_adv)
+    parser.add_argument('--semi', type=int, help='staring step for semi supervised learning', default=semi_start)
+    parser.add_argument('--cont', type=bool, help='continue training from previous state', default=False)
+
+    return parser.parse_args()
 
 
 def vaildate(model, test_loader, itr, type):
@@ -85,12 +92,20 @@ def vaildate(model, test_loader, itr, type):
 
             features = model['encoder'](sample)
             output = model['decoder'](features)
-            loss = compute_losses(upsample(output), target.to(device), type)
+            if type == 'dynamic':
+                loss = compute_losses(upsample_bb(output), target.to(device), type)
+            else:
+                loss = compute_losses(upsample_road(output), target.to(device), type)
+
             # print(road_image.shape)
             test_loss+=loss
 
-            pred_map = upsample(sigmoid(output))
-            ignore_mask = (pred_map <0.5)
+            if type == 'dynamic':
+                pred_map = upsample_bb(sigmoid(output))
+                ignore_mask = (pred_map <0.5)
+            else:
+                pred_map = upsample_road(sigmoid(output))
+                ignore_mask = (pred_map<0.3)
             map = torch.ones(pred_map.shape)
             map[ignore_mask] = 0
             map = map.view(1,800,800)
@@ -119,25 +134,9 @@ def vaildate(model, test_loader, itr, type):
                 ax[2].imshow(np.squeeze(pred_map.cpu().numpy()), cmap = 'binary')
                 # plt.savefig(os.path.join(save_dir,str(itr)+'.png'))
                 plt.close('all')
-    print('vaildate result: loss: {:.4f}\t ts: {:.4f}'.format(test_loss/total, test_ts/total))
+    print('iter: {:d}\t vaildate result: loss: {:.4f}\t ts: {:.4f}'.format(itr, test_loss/total, test_ts/total))
     return test_ts/total
 
-
-
-
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--type', type=str, choices =['static', 'dynamic'], help='Type of model being trained', default='dynamic')
-
-    return parser.parse_args()
-
-def make_D_label(label, ignore_mask):
-    ignore_mask = np.expand_dims(ignore_mask, axis=1)
-    D_label = np.ones(ignore_mask.shape)*label
-    D_label[ignore_mask] = 255
-    D_label = Variable(torch.FloatTensor(D_label)).to(device)
-
-    return D_label
 
 def compute_losses(pred, target, type):
     pred = torch.squeeze(pred)
@@ -150,26 +149,6 @@ def compute_losses(pred, target, type):
     output = loss(pred, target.float())
     # print(output.shape, output.item())
     return output
-    # losses = {}
-    #
-    # true_label = torch.squeeze(input.float())
-    # pred = torch.squeeze(output['topview_l'])
-    #
-    # # loss = nn.CrossEntropyLoss2d(weight=torch.Tensor([1., weight]).cuda())
-    # loss = nn.BCEWithLogitsLoss()
-    # #print(true_label.shape, pred.shape)
-    # output = loss(pred, true_label)
-    # losses['loss'] = output.mean()
-
-    # return losses
-
-def make_D_label(label, ignore_mask):
-    ignore_mask = np.expand_dims(ignore_mask, axis=1)
-    D_label = np.ones(ignore_mask.shape)*label
-    D_label[ignore_mask] = 255
-    D_label = Variable(torch.FloatTensor(D_label)).cuda(device)
-
-    return D_label
 
 def process_imgs(batch):
     batch[:,3:6] = batch[:,3:6].flip(3)
@@ -180,19 +159,19 @@ def train():
     arg = get_args()
     models = {}
     criterion_d = nn.BCEWithLogitsLoss()
-    criterion = nn.BCEWithLogitsLoss()
     parameters_to_train = []
     parameters_to_train_D = []
 
     # init models
-    models['encoder'] = model.Encoder(18, 512, 768, False, num_imgs=1)
+    models['encoder'] = model.Encoder(18, height*2, width*3, False, num_imgs=1)
     models['decoder'] = model.Decoder(models['encoder'].resnet_encoder.num_ch_enc)
     models['discriminator'] = model.Discriminator()
 
-    # models['encoder'].load_state_dict(torch.load(os.path.join(save_dir, '100_e.pth')))
-    # models['decoder'].load_state_dict(torch.load(os.path.join(save_dir, '100_d.pth')))
-    # models['discriminator'].load_state_dict(torch.load(os.path.join(save_dir, '100_dis.pth')))
-
+    if arg.cont:
+        bounding_state = torch.load(os.path.join(arg.save, 'gen.pth'))
+        models['encoder'].load_state_dict(bounding_state['encoder'])
+        models['decoder'].load_state_dict(bounding_state['decoder'])
+        models['discriminator'].load_state_dict(torch.load(os.path.join(arg.save, 'dis.pth')))
 
     for key in models.keys():
         models[key].to(device)
@@ -202,10 +181,8 @@ def train():
             parameters_to_train += list(models[key].parameters())
 
     #init optimizer
-    model_optimizer = optim.Adam(parameters_to_train, 2.5e-4)
-    model_lr_scheduler = optim.lr_scheduler.StepLR(model_optimizer, lr_step_size, 0.1)
-    model_optimizer_D = optim.Adam(parameters_to_train_D, 1e-4)
-    model_lr_scheduler_D = optim.lr_scheduler.StepLR(model_optimizer_D, lr_step_size, 0.1)
+    model_optimizer = optim.Adam(parameters_to_train, arg.lr)
+    model_optimizer_D = optim.Adam(parameters_to_train_D, arg.dlr)
     model_optimizer.zero_grad()
     model_optimizer_D.zero_grad()
 
@@ -220,8 +197,8 @@ def train():
         torchvision.transforms.ToTensor()
     ])
 
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+    if not os.path.exists(arg.save):
+        os.makedirs(arg.save)
 
     unlabled_trainset = UnlabeledDataset(
         image_folder=image_folder,
@@ -261,22 +238,10 @@ def train():
     )
     vaildateloader = DataLoader(labeled_vaildate, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
 
-    gt_label =1
-    pred_label = 0
-
-    bce_loss = BCEWithLogitsLoss2d()
     best_ts = 0
 
 
-    for i in range(epoch):
-        loss_seg_value = 0
-        loss_adv_pred_value = 0
-        loss_D_value = 0
-        loss_semi_value = 0
-        loss_semi_adv_value = 0
-
-        loss_ce = 0
-        loss_adv = 0
+    for i in range(arg.step):
         loss_d = 0
         loss_g = 0
 
@@ -291,14 +256,17 @@ def train():
 
             if(lambda_semi > 0 or lambda_semi_adv >0) and i > semi_start_adv:
                 try:
-                    batch = trainloader_u_iter.next()
+                    samples = trainloader_u_iter.next()
                 except:
                     trainloader_u_iter = iter(trainloader_u)
-                    batch = trainloader_u_iter.next()
+                    samples = trainloader_u_iter.next()
                 samples = process_imgs(samples)
 
                 features = models['encoder'](samples)
-                output = upsample(models['decoder'](features))
+                if arg.type =='dynamic':
+                    output = upsample_bb(models['decoder'](features))
+                else:
+                    output = upsample_road(models['decoder'](features))
 
                 fake_pred = models['discriminator'](output)
 
@@ -308,10 +276,12 @@ def train():
                     loss_semi_adv.backward()
                     loss_semi = 0
                 else:
-
-                    fake_pred_sig = upsample(sigmoid(fake_pred))
-
-                    ignore_mask = (fake_pred_sig < 0.3)
+                    if arg.type == 'dynamic':
+                        fake_pred_sig = upsample_bb(sigmoid(fake_pred))
+                        ignore_mask = (fake_pred_sig < 0.5)
+                    else:
+                        fake_pred_sig = upsample_road(sigmoid(fake_pred))
+                        ignore_mask = (fake_pred_sig<0.3)
                     semi_gt = torch.ones(fake_pred_sig.shape)
                     semi_gt[ignore_mask] = 0
 
@@ -339,23 +309,11 @@ def train():
             else:
                 target = torch.stack(road_image).view(batch_size,1,800,800).float().to(device)
 
-            # target_mask = (target == 1)
-            # temp = make_D_label(1, target_mask)
-
-            # #if arg.type == 'dynamic':
-            # # print(len(road_image))
-            # temp = batch_coordinates_to_binary_tensor(labled_target)
-            # print(temp.shape)
-            # # print(temp[0].shape, temp[1].shape)
-            # # for l in labled_target:
-            # #     print(l['bounding_box'].shape)
-            # #     res = coordinates_to_binary_tensor(l['bounding_box'])
-            # #     print(res.shape)
-
-
-
             features = models['encoder'](samples)
-            output = upsample(models['decoder'](features))
+            if arg.type == 'dynamic':
+                output = upsample_bb(models['decoder'](features))
+            else:
+                output = upsample_road(models['decoder'](features))
             # print(output.shape)
             #compute L_ce
             loss_ce = compute_losses(output, target, arg.type)
@@ -369,15 +327,15 @@ def train():
 
 
             #update
-            model_optimizer.zero_grad()
+            # model_optimizer.zero_grad()
             loss_g.backward(retain_graph=True)
             model_optimizer.step()
-            model_optimizer_D.zero_grad()
+            # model_optimizer_D.zero_grad()
             loss_d.backward()
             model_optimizer_D.step()
 
         if i %100 == 0:
-            print('training reslt: generator loss: {:.4f}\t disc loss: {:.4f}'.format(loss_g.item(), loss_d.item()))
+            print('itr: {:d}\t training reslt: generator loss: {:.4f}\t disc loss: {:.4f}'.format(i, loss_g.item(), loss_d.item()))
             ts = vaildate(models, vaildateloader, i, arg.type)
 
             if ts >= best_ts:
@@ -386,157 +344,6 @@ def train():
                     'decoder': models['decoder'].state_dict()
                 }, os.path.join(save_dir, 'gen.pth'))
                 torch.save(models['discriminator'].state_dict(), os.path.join(save_dir, 'dis.pth'))
-
-
-
-
-    # try:
-    #     batch = trainloader_u_iter.next()
-    # except:
-    #     trainloader_u_iter = iter(trainloader_u)
-    #     batch = trainloader_u_iter.next()
-    # features = models['encoder'](batch.view(batch_size, 18, 512, 512).to(device))
-    # print(features.shape)
-    # pred = models['decoder'](features)
-    #
-    # print(pred[0,0,0,:10])
-    # x = (sigmoid(upsample(pred)))
-    # print(x.shape)
-    # print(x[0][0].sum())
-    # d = models['discriminator'](x)
-    # print(d.shape)
-
-    # for i in range(epoch):
-    #     loss_seg_value = 0
-    #     loss_adv_pred_value = 0
-    #     loss_D_value = 0
-    #     loss_semi_value = 0
-    #     loss_semi_adv_value = 0
-    #
-    #     model_optimizer.zero_grad()
-    #     model_optimizer_D.zero_grad()
-    #
-    #     for sub_i in range(iter_size):
-    #         #train generator
-    #         if (lambda_semi > 0 or lambda_semi_adv > 0 ) and i >= semi_start_adv:
-    #             print('in here')
-    #             for param in models['discriminator'].parameters():
-    #                 param.requires_grad=False
-    #
-    #             try:
-    #                 batch = trainloader_u_iter.next()
-    #             except:
-    #                 trainloader_u_iter = iter(trainloader_u)
-    #                 batch = trainloader_u_iter()
-    #             features = models['encoder'](batch.view(batch_size, 18, r_height, r_width).to(device))
-    #             pred = models['decoder'](features)
-    #             pred_remain = pred.detach()
-    #             # print(pred.shape)
-    #
-    #             D_out = models['discriminator'](F.softmax(pred, dim=1))
-    #             # print(D_out.shape)
-    #             D_out_sigmoid = torch.sigmoid(D_out).data.cpu().numpy().squeeze(axis=1)
-    #             # print('doutsig', D_out_sigmoid)
-    #             ignore_mask_remain = np.zeros(D_out_sigmoid.shape).astype(np.bool)
-    #
-    #             loss_semi_adv = lambda_semi_adv * bce_loss(D_out, make_D_label(gt_label, ignore_mask_remain))
-    #             loss_semi_adv = loss_semi_adv/iter_size
-    #
-    #             loss_semi_adv_value+= loss_semi_adv.data.cpu().numpy()[0]/lambda_semi_adv
-    #
-    #             if lambda_semi <= 0 or i < semi_start:
-    #                 loss_semi_adv.backward()
-    #                 loss_semi_value = 0
-    #             else:
-    #                 semi_ignore_mask = (D_out_sigmoid < mask_t)
-    #                 semi_gt = pred.data.cpu().numpy
-    #             # print(loss_semi_adv)
-
-    #training
-    # for i in range(epoch):
-    #     # iter size = 1
-    #     model_optimizer.step()
-    #     model_optimizer_D.step()
-    #     loss = {}
-    #     loss['loss'], loss['loss_discr'] = 0.0, 0.0
-    #
-    #     for j in range(iter_size):
-    #         # train with labeled data first
-    #         outputs = {}
-    #
-    #         # Ld = min((CE(1,D(Il))+CE(0,D(Iu)))
-    #         loss_D = 0.0
-    #         # Lg = min(CE(yl,F(xl)) + alpha * CE(1,D(Iu)))
-    #         loss_G = 0.0
-    #
-    #         try:
-    #             samples, labled_target,road_image,_ = trainloader_l_iter.next()
-    #         except:
-    #             trainloader_l_iter = iter(trainloader_l)
-    #             samples, labled_target,road_image,extra = trainloader_l_iter()
-    #         #print(torch.stack(road_image).shape)
-    #         samples = torch.stack(samples).view(batch_size, 18, r_height,r_width).to(device)
-    #
-    #         features = models['encoder'](samples)
-    #         print(features.shape)
-    #         outputs['topview_l'] = models['decoder'](features)
-    #         #print(outputs['topview_l'].shape)
-    #
-    #         #compute generator loss for label data
-    #         if arg.type =='dynamic':
-    #             road_image = []
-    #         #generator loss
-    #         losses = compute_losses(torch.stack(road_image).to(device), outputs)
-    #         losses['loss_discr'] = torch.zeros(1)
-    #
-    #
-    #         real_pred = models['discriminator'](outputs['topview_l'])
-    #         print('disc', real_pred.shape)
-    #         loss_D += criterion_d(real_pred, vaild)
-    #         loss_G += losses['loss']
-    #         #print('done with label')
-    #
-    #         #train with unlabled data
-    #         try:
-    #             batch = trainloader_u_iter.next()
-    #         except:
-    #             trainloader_u_iter = iter(trainloader_u)
-    #             batch = trainloader_u_iter()
-    #
-    #         #print(batch.shape)
-    #
-    #         features = models['encoder'](batch.view(batch_size, 18, r_height, r_width).to(device))
-    #         outputs['topview_u'] = models['decoder'](features)
-    #
-    #         #skip compute generator loss for unlabel data
-    #         fake_pred = models['discriminator'](outputs['topview_u'])
-    #         loss_D += criterion_d(fake_pred, fake)
-    #         loss_G += alpha * criterion(fake_pred, vaild)
-    #
-    #         if i > discr_train_epoch:
-    #             model_optimizer.zero_grad()
-    #             loss_G.backward(retain_graph=True)
-    #             model_optimizer.step()
-    #
-    #             model_optimizer_D.zero_grad()
-    #             loss_D.backward()
-    #             model_optimizer_D.step()
-    #         else:
-    #             losses['loss'].backward()
-    #             model_optimizer.step()
-    #
-    #         loss['loss'] += losses['loss'].item()
-    #         loss['loss_discr'] += loss_D.item()
-    #
-    #     print('loss: {:.4f}, disc loss:{:.4f}'.format(loss['loss'], loss['loss_discr']))
-
-
-
-
-
-
-
-
 
 if __name__ == '__main__':
     train()
